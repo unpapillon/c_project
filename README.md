@@ -28,3 +28,6 @@ for this project, will do it similarly to what this guy has done:
 https://github.com/nikhilroxtomar/Chatroom-in-C/
 
 as for now, the server part is working, the client one, not yet.
+
+
+POUR LE FICHIER DE STOCKAGE DES AUTHENT, DIRE QUE DANS LE CAS OU ON AURAIT PLUS DE DONNÉES, ON AURAIT TOUT SIMPLEMENT PU AJOUTER DES ;

@@ -41,26 +41,101 @@ void send_message(char *s, int uid, int sockfd){
 /* Handle all communication with the client */
 void *handle_client(void *arg){
 	char buff_out[BUFFER_SZ];
-	char name[32];
+	char name[16];
+	char passwd[16];
 	int leave_flag = 0;
-
+	char choice[2];
+	FILE *login;
+	char readUsername[16];
+	char readPassword[16];
+	int connected = 0;
 	//cli_count++;
+	
 	client_t *cli = (client_t *)arg;
 
 	// Lecture du nom pour le client
 	//si l'entrée est nulle, alors elle est rejetée
-	if(recv(cli->sockfd, name, 32, 0) <= 0 || strlen(name) <  2 || strlen(name) >= 32-1){
-		printf("Didn't enter the name.\n");
+	
+	if(recv(cli->sockfd, choice, 1, 0)<= 0){
+		printf("didn't received the choice\n");
 		leave_flag = 1;
-	} else{
-		//sinon on copie dans l'attribut name du client, la variable name recue par le serveur
-		//on la met ensuite dans un buffer, que l'on affiche et que l'on envoie aux autre clients (à fixer avec la fonction d'envoie de messages)
-		strcpy(cli->name, name);
-		sprintf(buff_out, "%s has joined\n", cli->name);
-		printf("%s", buff_out);
-		send_message(buff_out, cli->uid, cli->sockfd);
-	}
+	}else{
+		printf("choice: %s|\n", choice);
+		//TODO: enquter pourquoi quand on met une valeur genre 60 (égale à lantaille de ce qui est envoyé, ca fail ca mere la pute)
+		if(recv(cli->sockfd, name, 16, 0) <= 0 || strlen(name) <  2 || strlen(name) >= 60-1){
+			printf("Didn't enter the name.\n");
+			leave_flag = 1;
+		} else{
+			printf("name: %s|", name);
+			if (recv(cli -> sockfd, passwd, 16, 0) <=0)
+			{
+				printf("didn't received the password\n");
+				leave_flag = 1;
+			}else{
+				printf("password: %s|", passwd);
+				if(strcmp(choice, "1") == 0){
+					//on l'ouvre ici pour ne pas l'ouvrir alors qu'on ne souhaite pas ajouter de compte
+					login = fopen("./login.txt","a+");
+					//verification que le compte n'existe pas déjà
+					while (!feof(login))
+					{
+						//ce fscanf permet de vérifier que l'on lie bien une ligne sur deux, pour ne voir que le username, et voir si ce username existe déjà
+						fscanf(login, "%s;%s\n", readUsername, readPassword);
+						if(strcmp(readUsername, name)==0){
+							printf("Ce nom d'utilisateur existe déjà, veuillez relancer le client et entrer un username qui n'existe pas");
+							leave_flag = 1;
+							break;
+						}
+						else{
+							printf("Ce \n");
+						}
 
+					}
+					if (leave_flag!=1)
+					{
+					fprintf(login, "%s ; %s\n", name, passwd);
+					printf("les credentials sont bien enregistrées\n");
+					connected =1;
+					}
+					fclose(login);
+				}
+				else if(strcmp(choice, "2") == 0){
+					login = fopen("./login.txt", "r");
+					while (!feof(login))
+					{
+						fscanf(login, "%s ; %s\n", readUsername, readPassword);
+						printf("\n readusername: %s", readUsername);
+						printf("\n readpassw: %s", readPassword);
+						if(strcmp(readUsername, name)==0 && strcmp(readPassword, passwd)==0){
+							printf("\nbien connecté\n");
+							connected = 1;
+							break;
+						}
+						else{
+							printf("les credentials ne sont pas bonnes\n");
+							
+						}
+
+					}
+				}
+			if (connected == 1)
+			{
+				//sinon on copie dans l'attribut name du client, la variable name recue par le serveur
+				//on la met ensuite dans un buffer, que l'on affiche et que l'on envoie aux autre clients (à fixer avec la fonction d'envoie de messages)
+				strcpy(cli->name, name);
+				sprintf(buff_out, "%s has joined\n", cli->name);
+				printf("%s", buff_out);
+				send_message(buff_out, cli->uid, cli->sockfd);
+			}else{
+				leave_flag = 1;
+				printf("veuillez relancer le client pour ressayer de vous connecter\n");
+			}
+			}
+			
+				
+			
+		}
+	}
 	bzero(buff_out, BUFFER_SZ);
 
 	while(1){
@@ -78,6 +153,7 @@ void *handle_client(void *arg){
 				printf("%s -> %s\n", buff_out, cli->name);
 			}
 			//sinon, si le buffer est nul, ou bien qu'il a tapé le mot exit, alors on clos la connection
+			//TODO: ca ne marche pas, à corriger
 		} else if (receive == 0 || strcmp(buff_out, "exit") == 0){
 			sprintf(buff_out, "%s has left\n", cli->name);
 			printf("%s", buff_out);
@@ -97,7 +173,7 @@ void *handle_client(void *arg){
 //   queue_remove(cli->uid);
 //   free(cli);
 //   cli_count--;
-  pthread_detach(pthread_self());
+  	pthread_detach(pthread_self());
 
 	return NULL;
 }
