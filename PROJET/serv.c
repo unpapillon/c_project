@@ -38,24 +38,66 @@ void send_message(char *s, int uid, int sockfd){
 	pthread_mutex_unlock(&clients_mutex);
 }
 
-/* Handle all communication with the client */
-void *handle_client(void *arg){
-	char buff_out[BUFFER_SZ];
-	char name[16];
-	char passwd[16];
+int addAccount(char name[16], char passwd[16]){
+	FILE *login;
+	char readUsername[16];
+	char readPassword[16];
 	int leave_flag = 0;
-	char choice[2];
+	int connected = 0;
+		//on l'ouvre ici pour ne pas l'ouvrir alors qu'on ne souhaite pas ajouter de compte
+		login = fopen("./login.txt","a+");
+		//verification que le compte n'existe pas déjà
+		while (!feof(login))
+		{
+			//ce fscanf permet de vérifier que l'on lie bien une ligne sur deux, pour ne voir que le username, et voir si ce username existe déjà
+			fscanf(login, "%s;%s\n", readUsername, readPassword);
+			if(strcmp(readUsername, name)==0){
+				printf("Ce nom d'utilisateur existe déjà, veuillez relancer le client et entrer un username qui n'existe pas");
+				leave_flag = 1;
+				break;
+			}
+		}
+		if (leave_flag!=1)
+		{
+		fprintf(login, "%s ; %s\n", name, passwd);
+		printf("les credentials sont bien enregistrées\n");
+		connected =1;
+		}
+		fclose(login);
+	return connected;
+}
+
+int login(char name[16], char passwd[16]){
 	FILE *login;
 	char readUsername[16];
 	char readPassword[16];
 	int connected = 0;
-	//cli_count++;
-	
-	client_t *cli = (client_t *)arg;
+	login = fopen("./login.txt", "r");
+	while (!feof(login))
+	{
+		fscanf(login, "%s ; %s\n", readUsername, readPassword);
+		printf("\n readusername: %s", readUsername);
+		printf("\n readpassw: %s", readPassword);
+		if(strcmp(readUsername, name)==0 && strcmp(readPassword, passwd)==0){
+			printf("\nbien connecté\n");
+			connected = 1;
+			break;
+		}
+		else{
+			printf("les credentials ne sont pas bonnes\n");
+		}
+	}
+	return connected;
+}
 
-	// Lecture du nom pour le client
-	//si l'entrée est nulle, alors elle est rejetée
-	
+int authent(client_t *cli){
+	char buff_out[BUFFER_SZ];
+	char name[16];
+	char passwd[16];
+	int leave_flag = 0;
+	char choice[2] = "";
+
+	int connected = 0;
 	if(recv(cli->sockfd, choice, 1, 0)<= 0){
 		printf("didn't received the choice\n");
 		leave_flag = 1;
@@ -74,49 +116,20 @@ void *handle_client(void *arg){
 			}else{
 				printf("password: %s|", passwd);
 				if(strcmp(choice, "1") == 0){
-					//on l'ouvre ici pour ne pas l'ouvrir alors qu'on ne souhaite pas ajouter de compte
-					login = fopen("./login.txt","a+");
-					//verification que le compte n'existe pas déjà
-					while (!feof(login))
-					{
-						//ce fscanf permet de vérifier que l'on lie bien une ligne sur deux, pour ne voir que le username, et voir si ce username existe déjà
-						fscanf(login, "%s;%s\n", readUsername, readPassword);
-						if(strcmp(readUsername, name)==0){
-							printf("Ce nom d'utilisateur existe déjà, veuillez relancer le client et entrer un username qui n'existe pas");
-							leave_flag = 1;
-							break;
+					int verif = addAccount(name, passwd);
+					if(!verif){
+						leave_flag = 1;
+						}else{
+							connected = verif;
 						}
-						else{
-							printf("Ce \n");
-						}
-
-					}
-					if (leave_flag!=1)
-					{
-					fprintf(login, "%s ; %s\n", name, passwd);
-					printf("les credentials sont bien enregistrées\n");
-					connected =1;
-					}
-					fclose(login);
 				}
 				else if(strcmp(choice, "2") == 0){
-					login = fopen("./login.txt", "r");
-					while (!feof(login))
-					{
-						fscanf(login, "%s ; %s\n", readUsername, readPassword);
-						printf("\n readusername: %s", readUsername);
-						printf("\n readpassw: %s", readPassword);
-						if(strcmp(readUsername, name)==0 && strcmp(readPassword, passwd)==0){
-							printf("\nbien connecté\n");
-							connected = 1;
-							break;
+					int verif = login(name, passwd);
+					if(!verif){
+						leave_flag = 1;
+						}else{
+							connected = verif;
 						}
-						else{
-							printf("les credentials ne sont pas bonnes\n");
-							
-						}
-
-					}
 				}
 			if (connected == 1)
 			{
@@ -131,14 +144,26 @@ void *handle_client(void *arg){
 				printf("veuillez relancer le client pour ressayer de vous connecter\n");
 			}
 			}
-			
-				
-			
 		}
 	}
 	bzero(buff_out, BUFFER_SZ);
+	return connected;
+}
 
-	while(1){
+
+/* Handle all communication with the client */
+void *handle_client(void *arg){
+	char buff_out[BUFFER_SZ];
+	int leave_flag = 0;
+	//cli_count++;
+	
+	client_t *cli = (client_t *)arg;
+
+	// Lecture du nom pour le client
+	//si l'entrée est nulle, alors elle est rejetée
+	
+	if(authent(cli) == 1){
+		while(1){
 		if (leave_flag) {
 			break;
 		}
@@ -164,10 +189,12 @@ void *handle_client(void *arg){
 			printf("ERROR: -1\n");
 			leave_flag = 1;
 		}
-
 		bzero(buff_out, BUFFER_SZ);
 	}
-
+	}else{
+		printf("Vous n'etes pas connectés\n");
+	}
+	
   /* Delete client from queue and yield thread */
 	close(cli->sockfd);
 //   queue_remove(cli->uid);
