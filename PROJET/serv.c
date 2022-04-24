@@ -10,27 +10,23 @@
 #include <sys/types.h>
 #include <signal.h>
 
-#define MAX_CLIENTS 100
-#define BUFFER_SZ 2048
+#define SIZE_BUFF 2048
 #define MAX 4092
 
-// static  unsigned int cli_count = 0;
-// static int uid = 10;
-
-/* Client structure */
+//structure type définissant un client
 typedef struct{
 	struct sockaddr_in address;
-	int sockfd;
-	char name[32];
-} client_t;
+	int clientSocket;
+	char name[16];
+} clientStruct;
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 
-void req_send(char *s, int sockfd){
+void req_send(char *s, int clientSocket){
 	pthread_mutex_lock(&mutex);
 	//envoie, via la meme socket du client, d'un message de la part du serveur
-		if(write(sockfd, s, strlen(s)) < 0){
+		if(write(clientSocket, s, strlen(s)) < 0){
 			printf("erreur pendant l'envoie du message");
 			kill(getpid(), SIGABRT);
 		}
@@ -38,7 +34,7 @@ void req_send(char *s, int sockfd){
 	pthread_mutex_unlock(&mutex);
 }
 
-int addAccount(char name[16], char passwd[16], client_t *cli){
+int addAccount(char name[16], char passwd[16], clientStruct *clientConnected){
 	FILE *login;
 	char readUsername[16];
 	char readPassword[16];
@@ -53,7 +49,7 @@ int addAccount(char name[16], char passwd[16], client_t *cli){
 			fscanf(login, "%s;%s\n", readUsername, readPassword);
 			if(strcmp(readUsername, name)==0){
 				printf("Ce nom d'utilisateur existe déjà, veuillez relancer le client et entrer un username qui n'existe pas\n");
-				req_send("1", cli -> sockfd);
+				req_send("1", clientConnected -> clientSocket);
 				leave_flag = 1;
 				break;
 			}
@@ -120,48 +116,52 @@ void deleteAccount(char name[16], char passwd[16]){
 	rename("./temp.txt", "./login.txt");
 }
 
-int authent(client_t *cli){
-	char buff_out[BUFFER_SZ];
+int authent(clientStruct *clientConnected){
+	char buff_out[SIZE_BUFF];
 	char name[16];
 	char passwd[16];
 	char choice[2] = "";
 	int connected = 0;
 
-	if(recv(cli->sockfd, choice, 1, 0)<= 0){
+	if(recv(clientConnected->clientSocket, choice, 1, 0)<= 0){
 		printf("didn't received the choice\n");
 	}else{
 		printf("choice: %s|\n", choice);
 		// Lecture du nom pour le client
 		//si l'entrée est nulle, alors elle est rejetée
-		if(recv(cli->sockfd, name, 16, 0) <= 0 || strlen(name) > 16){
+		if(recv(clientConnected->clientSocket, name, 16, 0) <= 0 || strlen(name) > 16){
 			printf("Probleme avec le pseudo\n");
 		} else{
-			if (recv(cli -> sockfd, passwd, 16, 0 || strlen(passwd) > 16) <=0)
+			if (recv(clientConnected -> clientSocket, passwd, 16, 0 || strlen(passwd) > 16) <=0)
 			{
 				printf("Probleme avec le MDP\n");
 			}else{
 				//si la requete est d'ajouter un compte
 				if(strcmp(choice, "1") == 0){
-					int verif = addAccount(name, passwd, cli);
+					int verif = addAccount(name, passwd, clientConnected);
 					if(verif){connected = verif;}
 				}
 				//si la requete est de se connecter
 				else if(strcmp(choice, "2") == 0){
 					int verif = login(name, passwd);
 					if(verif){connected = verif;}
+					else{
+						printf("mauvais identifiants");
+						req_send(choice, clientConnected ->clientSocket);
+					}
 				}
 				//si la requete est de supprimer un compte
 				else if(strcmp(choice, "3") == 0){
 					deleteAccount(name, passwd);
 					printf("account deleted\n");
-					req_send(choice, cli->sockfd);
+					req_send(choice, clientConnected->clientSocket);
 				}
 			if (connected == 1)
 			{
 				//sinon on copie dans l'attribut name du client, la variable name recue par le serveur
 				//on la met ensuite dans un buffer, que l'on affiche et que l'on envoie aux autre clients (à fixer avec la fonction d'envoie de messages)
-				strcpy(cli->name, name);
-				sprintf(buff_out, "%s has joined\n", cli->name);
+				strcpy(clientConnected->name, name);
+				sprintf(buff_out, "%s has joined\n", clientConnected->name);
 				printf("%s", buff_out);
 			}else{
 				printf("veuillez relancer le client pour ressayer de vous connecter\n");
@@ -169,39 +169,39 @@ int authent(client_t *cli){
 			}
 		}
 	}
-	bzero(buff_out, BUFFER_SZ);
+	bzero(buff_out, SIZE_BUFF);
 	return connected;
 }
 
 /* Handle all communication with the client */
-void *handle_client(void *arg){
-	char buff_out[BUFFER_SZ];
+void *clientCommunications(void *arg){
+	char buff_out[SIZE_BUFF];
 	int leave_flag = 0;
 	
-	client_t *cli = (client_t *)arg;
+	clientStruct *clientConnected = (clientStruct *)arg;
 
-	if(authent(cli) == 1){
+	if(authent(clientConnected) == 1){
 		while(1){
 		if (leave_flag) {
 			break;
 		}
 		//si on reçoit un message
-		int receive = recv(cli->sockfd, buff_out, BUFFER_SZ, 0);
+		int receive = recv(clientConnected->clientSocket, buff_out, SIZE_BUFF, 0);
 		if (receive > 0){
 			//et que la taille du message est supérieure à 0
 			if(strlen(buff_out) > 0 && strcmp(buff_out, "\n") !=0){
 				//soit on écrit le message, soit, si la demande est de quitter le chat, alors
 				//le client est déconnecté
 				if(strcmp(buff_out, "exit\n") == 0){
-					sprintf(buff_out, "%s has left\n", cli->name);
+					sprintf(buff_out, "%s has left\n", clientConnected->name);
 					printf("%s", buff_out);
 					leave_flag = 1;
 				}else{
-					printf("\n%s: %s\n", cli->name, buff_out);
+					printf("\n%s: %s\n", clientConnected->name, buff_out);
 				}
 			}
 		} else if (receive == 0){
-			sprintf(buff_out, "%s has left\n", cli->name);
+			sprintf(buff_out, "%s has left\n", clientConnected->name);
 			printf("%s", buff_out);
 			leave_flag = 1;
 			//sinon erreur
@@ -209,14 +209,14 @@ void *handle_client(void *arg){
 			printf("Error while connection\n");
 			leave_flag = 1;
 		}
-		bzero(buff_out, BUFFER_SZ);
+		bzero(buff_out, SIZE_BUFF);
 	}
 	}else{
 		printf("Vous n'etes pas connectés\n");
 
 	}
 	
-	close(cli->sockfd);
+	close(clientConnected->clientSocket);
 
   	pthread_detach(pthread_self());
 
@@ -228,23 +228,20 @@ int main(int argc, char **argv){
 
 	int port = atoi(argv[1]);
 	int option = 1;
+	int listenforclients = 0, connectionEstab = 0;
+	struct sockaddr_in serv_addr;
+	struct sockaddr_in cli_addr;
+	pthread_t clientThread;
 
 	if(argc != 2){
 		printf("Veuillez rentrer le port sur lequel le serveur va écouter: %s <port>\n", argv[0]);
 		return EXIT_FAILURE;
 	}
+	
+	
 
-	signal(SIGPIPE, SIG_IGN);
-
-	//String to short
-
-	int listenfd = 0, connfd = 0;
-	struct sockaddr_in serv_addr;
-	struct sockaddr_in cli_addr;
-	pthread_t tid;
-
-    //Socket settings
-	listenfd = socket(AF_INET, SOCK_STREAM, 0);
+   //paramètres basiques pour la connection de la socket
+	listenforclients = socket(AF_INET, SOCK_STREAM, 0);
 	serv_addr.sin_family = AF_INET;
 	serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 	//d'après le man pour htons 
@@ -253,42 +250,39 @@ int main(int argc, char **argv){
 	serv_addr.sin_port = htons(port);
 
 
-
-	if(setsockopt(listenfd, SOL_SOCKET, (SO_REUSEPORT | SO_REUSEADDR), (char*)&option, sizeof(option))<0){
-		printf("socket setting up failed\n");
+	//on met en place la socket, avec les meme port, et meme adresse pour chaque nouvel arrivant
+	if(setsockopt(listenforclients, SOL_SOCKET, (SO_REUSEPORT | SO_REUSEADDR), (char*)&option, sizeof(option))<0){
+		printf("la socket n'a pas pu être mise en place\n");
 		kill(getpid(), SIGABRT);
 	}
 
 	//liaison avec la socket
 
-	if(bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0){
-		printf("ERROR while binding\n");
+	if(bind(listenforclients, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0){
+		printf("erreur lors du bind\n");
 		kill(getpid(), SIGABRT);
 	}
 
 	//on écoute sur le port, avec la socket établie plus tot, pour recevoir les messages
-	if (listen(listenfd, 10)< 0){
-		printf("ERROR while listening\n");
+	//on autorise seulement 5 clients ici, mais cette valeur est modifiable
+	if (listen(listenforclients, 5)< 0){
+		printf("erreur lors du listen\n");
 		kill(getpid(), SIGABRT);
 	}
 
-	printf("HERE IS THE CHAT AND MESSAGES\n");
+	printf("VOICI LES MESSAGES\n");
 
 	while(1){
 
 		socklen_t clilen = sizeof(cli_addr);
-		connfd = accept(listenfd, (struct sockaddr*)&cli_addr, &clilen);
-	
-	
-	
-		client_t *cli = (client_t *)malloc(sizeof(client_t));
-		cli->address = cli_addr;
-		cli->sockfd = connfd;
+		connectionEstab = accept(listenforclients, (struct sockaddr*)&cli_addr, &clilen);
 
-		pthread_create(&tid, NULL, &handle_client, (void*)cli);
+		clientStruct *clientConnected = (clientStruct *)malloc(sizeof(clientStruct));
+		clientConnected->address = cli_addr;
+		clientConnected->clientSocket = connectionEstab;
 
+		pthread_create(&clientThread, NULL, &clientCommunications, (void*)clientConnected);
 
 	};
-	//penser a mettre le close connfd ici
-	close(connfd);
+	close(connectionEstab);
 }

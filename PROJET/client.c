@@ -11,56 +11,48 @@
 
 #define LENGTH 2048
 
-struct arg_struct {
+struct client {
     int sockfd;
-    char name[62];
+    char name[16];
 };
 
-struct auth{
-    int sockfd;
-    int choice;
-    char username[30];
-    char passwd[30];
-};
-
-void send_msg_handler(void *arguments) {
+void sendingMsg(void *arguments) {
     char message[LENGTH] = {};
-    char buffer[LENGTH + 32] = {};
-    struct arg_struct *args = arguments;
-    // int *sockvalue = (int *) arguments;
-    // int sockfd = *sockvalue;
+    struct client *args = arguments;
     printf("=== BIENVENU SUR LE CHAT ===\n");
-    printf("vous pouvez envoyer des messages désormais %s: ",args -> name);
+    printf("vous pouvez envoyer des messages désormais %s: \nsi vous souhaitez vous déconnecter, faites ctrl+c, ou bien tapez exit",args -> name);
     while(1) {
         printf("\n->");
+        //l'utilisateur rentre le message qu'il souhaite envoyer
         fgets(message, LENGTH, stdin);
-        strcpy(buffer, message);
-        // sprintf(buffer, "%s: %s", args -> name, message);
-        if(strlen(buffer) > 0 && strcmp(buffer, "\n") !=0){
-            send(args -> sockfd, buffer, strlen(buffer), 0);
+        //on vérifie que le message n'est pas vide, pour ne pas envoyer de données inutiles
+        if(strlen(message) > 0 && strcmp(message, "\n") !=0){
+            send(args -> sockfd, message, strlen(message), 0);
+        }else if(strlen(message) < 0 || strlen(message)> LENGTH){
+            //si les conditions ne sont pas vérifiées, alors on interromp le programme
+            kill(getpid(), SIGINT);
         }
-        if(strcmp(buffer, "exit\n") == 0){
+        if(strcmp(message, "exit\n") == 0){
+            //si le mot exit est tapé, alors on déconnecte, tant bien du coté serveur (CF serv.c) que du coté client.
             printf("vous avez bien été déconnecté du serveur\n");
-            //SIGNAL
             kill(getpid(), SIGTERM);
         }
+
         }
-        //clean messages and buffer
+        //on vide l'espace mémoire du message pour le prochain
         bzero(message, LENGTH);
-        bzero(buffer, LENGTH + 32);
-    // }
 }
 
 
 
-void getRequest(struct arg_struct *args){
+void getRequest(struct client *args){
     char choice[2] = "";
     char username[16];
     char password[16];
     char buffer[LENGTH + 32] = {};
     char entry[4092];
     printf("Vous etes sur le point de rentrer dans le chat:\n-si vous voulez créer un compte, tapez 1\n-si vous voulez vous connecter, tapez 2\n-si vous voulez supprimer un compte, tapez 3\n");
-
+    //vérification des input pour éviter l'overflow de mémoire
     while(1){
         scanf("%s", entry);
         if(strlen(entry) < 2){
@@ -72,7 +64,6 @@ void getRequest(struct arg_struct *args){
             bzero(entry, 4092);
         }
     }
-//TODO: faire un switch   
     if(strcmp(choice, "1") == 0){
         printf("veuillez définir vos credentials, 16 caractères chacuns au maximum\n");
     }
@@ -82,6 +73,7 @@ void getRequest(struct arg_struct *args){
     if(strcmp(choice, "3") == 0){
         printf("veuillez entrer les credentials du compte à supprimer\n");
     }
+    //vérification des input pour éviter l'overflow de mémoire
 	printf("Username:  ");
     while(1){
         scanf("%s", entry);
@@ -106,40 +98,43 @@ void getRequest(struct arg_struct *args){
             bzero(entry, 4092);
         }
     }
+    //on envoie le type de requete, ainsi que les credentials rentrées, puis on efface l'espace mémoire utilisé
     strcpy(args->name, username);
     send(args->sockfd, choice, 1, 0);
     send(args->sockfd, username, 16, 0);
     send(args->sockfd, password, 16, 0);
     bzero(username, 16);
     bzero(password, 16);
-    bzero(buffer, LENGTH + 32);
-    
+    bzero(buffer, LENGTH + 32); 
 }
 
 
-void recv_msg_handler(void *arguments) {
+void receptionMsg(void *arguments) {
 	char message[LENGTH] = {};
-    struct arg_struct *args = arguments;
-    // int *sockvalue = (int *) arg;
-    // int sockfd = *sockvalue;
-
+    struct client *args = arguments;
+    //traitement des réponses provenant du serveur suite aux requetes envoyées par le client
     while (1) {
         int receive = recv(args -> sockfd, message, LENGTH, 0);
         if (receive > 0) {
             if(strcmp(message, "3") == 0){
-                printf("le compte à bien été supprimé\nVeuillez relancer le client si vous souhaitez requeter le serveur de nouveau");
+                printf("le compte à bien été supprimé\nVeuillez relancer le client si vous souhaitez requeter le serveur de nouveau\n");
                 kill(getpid(), SIGTERM);
             }
             else if(strcmp(message, "1") == 0){
-                printf("le compte existe déjà, veuillez relancer le client, et créer un compte avec un pseudo qui n'a pas déjà été pris");
+                printf("le compte existe déjà, veuillez relancer le client, et créer un compte avec un pseudo qui n'a pas déjà été pris\n");
                 kill(getpid(), SIGTERM);
             }
+            else if (strcmp(message, "2") == 0)
+            {
+                printf("mauvais pseudo ou mot de passe, veuillez relancer le client et tenter de vous connecter avec les bons identifiants\n");
+                kill(getpid(), SIGTERM);
+            }
+            
         } else if (receive == 0) {
                 break;
         } else {
-                kill(getpid(), SIGKILL);
-            }
-            memset(message, 0, sizeof(message));
+            kill(getpid(), SIGKILL);
+        }
     }
     bzero(message, LENGTH);
 }
@@ -147,10 +142,11 @@ void recv_msg_handler(void *arguments) {
 
 int main(int argc, char **argv){
 
-    struct arg_struct args;
+    struct client args;
     args.sockfd = 0;
-    
-    struct sockaddr_in server_addr;
+    pthread_t receptionThread;
+    pthread_t sendingThread;
+    struct sockaddr_in serveur;
     
 	if(argc != 2){
 		printf("Veuillez rentrer le port sur lequel le serveur écoute: %s <port>\n", argv[0]);
@@ -160,15 +156,15 @@ int main(int argc, char **argv){
 	char *ip = "127.0.0.1";
 	int port = atoi(argv[1]);
 
-	/* Socket settings */
+	//paramètre basiques pour la connection de la socket
 	args.sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = inet_addr(ip);
-    server_addr.sin_port = htons(port);
+    serveur.sin_family = AF_INET;
+    serveur.sin_addr.s_addr = inet_addr(ip);
+    serveur.sin_port = htons(port);
 
 
-  // Connect to Server
-    int err = connect(args.sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr));
+  // connection au serveur sur le port donné, à l'addresse données
+    int err = connect(args.sockfd, (struct sockaddr *)&serveur, sizeof(serveur));
     if (err == -1) {
         printf("Erreur de connection\n");
         kill(getpid(), SIGTERM);
@@ -176,16 +172,14 @@ int main(int argc, char **argv){
     
     getRequest(&args);
 
-	
-
-    pthread_t recv_msg_thread;
-    pthread_t send_msg_thread;
-
-    if(pthread_create(&recv_msg_thread, NULL, (void *) recv_msg_handler, (void*)&args) != 0){
+    
+    //mise en place d'un thread pour la fonction de reception des messages de la part du serveur
+    if(pthread_create(&receptionThread, NULL, (void *) receptionMsg, (void*)&args) != 0){
 		printf("ERROR while using thread for receive messages\n");
 		kill(getpid(), SIGTERM);
 	}
-    if(pthread_create(&send_msg_thread, NULL, (void *) send_msg_handler, (void*)&args) != 0){
+    //mise en place d'un autre thread pour l'envoi des messages
+    if(pthread_create(&sendingThread, NULL, (void *) sendingMsg, (void*)&args) != 0){
 		printf("ERROR while using thread for sending message\n");
         kill(getpid(), SIGTERM);
 	}
